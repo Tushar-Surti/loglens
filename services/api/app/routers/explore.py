@@ -14,6 +14,10 @@ from ..serialization import doc, docs, jsonable
 
 router = APIRouter(tags=["logs"])
 
+#: Upper bound on the exact-count query; beyond this the total is reported as a
+#: floor so a wide range cannot pin the database on a count nobody reads.
+COUNT_CAP = 200_000
+
 SORT_FIELDS = {
     "timestamp": "timestamp",
     "response_time": "response_time_ms",
@@ -102,9 +106,15 @@ async def search_logs(
     items = [row async for row in cursor]
 
     total = None
+    capped = False
     if count_total:
-        # Bounded so a pathological range cannot pin the database.
-        total = await database[Collections.RAW_LOGS].count_documents(criteria, maxTimeMS=4000, limit=200_000)
+        # Bounded so a pathological range cannot pin the database. When the cap
+        # is reached the number is a floor, not a count — say so, rather than
+        # presenting "200,000" as if it were exact.
+        total = await database[Collections.RAW_LOGS].count_documents(
+            criteria, maxTimeMS=4000, limit=COUNT_CAP
+        )
+        capped = total >= COUNT_CAP
 
     return {
         "range": window.as_dict(),
@@ -112,6 +122,7 @@ async def search_logs(
         "items": docs(items),
         "count": len(items),
         "total": total,
+        "total_is_capped": capped,
         "limit": page.limit,
         "offset": page.offset,
         "has_more": len(items) == page.limit,

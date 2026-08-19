@@ -61,6 +61,11 @@ export function LogExplorer() {
 
   const rows = mode === 'tail' ? tail.events : (logs.data?.items ?? [])
   const total = logs.data?.total
+  // A capped count is a floor, not a total.
+  const totalLabel =
+    total === null || total === undefined
+      ? null
+      : `${number(total)}${logs.data?.total_is_capped ? '+' : ''}`
 
   return (
     <PageTransition>
@@ -131,7 +136,7 @@ export function LogExplorer() {
       {mode === 'search' ? (
         <Panel
           title="Matches over time"
-          subtitle={total !== null && total !== undefined ? `${number(total)} matching requests` : 'live count'}
+          subtitle={totalLabel ? `${totalLabel} matching requests` : 'live count'}
           className="mb-4"
         >
           {histogram.isLoading ? (
@@ -158,7 +163,7 @@ export function LogExplorer() {
           subtitle={
             mode === 'tail'
               ? `${rows.length} buffered${tail.throttled ? ` · ${tail.throttled} dropped by rate limit` : ''}`
-              : `${rows.length} shown${total ? ` of ${number(total)}` : ''}`
+              : `${rows.length} shown${totalLabel ? ` of ${totalLabel}` : ''}`
           }
           dense
           actions={

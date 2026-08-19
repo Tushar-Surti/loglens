@@ -73,7 +73,14 @@ export const useTrafficPatterns = () =>
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
 export const useLogs = (params: Params, enabled = true) =>
-  live<{ items: LogEvent[]; total: number | null; count: number; has_more: boolean; range: RangeMeta }>(
+  live<{
+    items: LogEvent[]
+    total: number | null
+    total_is_capped?: boolean
+    count: number
+    has_more: boolean
+    range: RangeMeta
+  }>(
     ['logs'],
     '/logs',
     params,
