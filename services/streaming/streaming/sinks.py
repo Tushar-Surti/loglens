@@ -7,9 +7,11 @@ Two very different write patterns live here, on purpose:
 * **Aggregates** are tiny (a handful of rows per window), so they are collected
   to the driver with ``toPandas`` where the detection ensemble runs.
 
-Detection only fires for **closed** windows (``window_end`` older than the
-watermark).  Structured Streaming re-emits an open window on every trigger; a
-partially-filled window would otherwise look like a traffic collapse.
+Metrics are written from the stream as they change, so the dashboard stays
+real-time.  Detection runs separately, sweeping MongoDB for windows that have
+closed since the last batch — a window that is still being updated must not be
+scored, and by the time it stops being updated Spark no longer emits it.  See
+``BaseSink.fetch_undetected``.
 """
 
 from __future__ import annotations
@@ -172,6 +174,62 @@ class BaseSink:
         stamps = pd.to_datetime(frame[column], utc=True)
         return frame[stamps <= cutoff]
 
+    # ── Detection sweep ──────────────────────────────────────────────────────
+    #
+    # Detection cannot run on the batch Spark just handed us.
+    #
+    # In `update` output mode a window is emitted only while it is still
+    # *changing*. A window becomes safe to score only once it has closed —
+    # which is precisely when Spark stops emitting it. Filtering the incoming
+    # batch for closed windows therefore matches almost nothing in steady
+    # state, and live detection silently stops as soon as the pipeline catches
+    # up with real time. (It appeared to work while replaying a backlog, where
+    # each batch spanned event-time far behind the wall clock.)
+    #
+    # So the sinks keep writing metrics from the stream — the dashboard charts
+    # stay real-time — and detection sweeps MongoDB for windows that have since
+    # closed and have not been scored yet. Metrics are live; detection trails by
+    # the watermark, which is exactly the guarantee the watermark provides.
+    def fetch_undetected(
+        self,
+        collection: str,
+        lookback_minutes: int = 30,
+        limit: int = 4000,
+    ) -> pd.DataFrame:
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(seconds=WATERMARK_SECONDS)
+        criteria = {
+            "window_start": {"$gte": now - timedelta(minutes=lookback_minutes)},
+            "window_end": {"$lte": cutoff},
+            "detected": {"$ne": True},
+        }
+        docs = list(
+            self.db[collection].find(criteria, {"_id": 0}).sort("window_start", 1).limit(limit)
+        )
+        if not docs:
+            return pd.DataFrame()
+        frame = pd.DataFrame(docs)
+        for column in ("window_start", "window_end"):
+            if column in frame:
+                frame[column] = pd.to_datetime(frame[column], utc=True)
+        return frame
+
+    def mark_detected(self, collection: str, frame: pd.DataFrame, key_fields: List[str]) -> None:
+        """Flag swept windows so they are scored exactly once."""
+        if frame is None or frame.empty:
+            return
+        from pymongo import UpdateOne
+
+        operations = []
+        for _, row in frame.iterrows():
+            criteria = {}
+            for field in key_fields:
+                value = row[field]
+                criteria[field] = value.to_pydatetime() if hasattr(value, "to_pydatetime") else value
+            operations.append(UpdateOne(criteria, {"$set": {"detected": True}}))
+        if operations:
+            self.db[collection].bulk_write(operations, ordered=False)
+
     def save_anomalies(self, anomalies: List[Dict[str, Any]]) -> int:
         unique = dedupe(anomalies)
         if not unique:
@@ -316,8 +374,12 @@ class GlobalMetricSink(BaseSink):
         bulk_upsert(Collections.METRICS_GLOBAL, docs, ["window_start"], db=self.db)
         self._write_status_docs(docs)
 
-        closed = self.closed(pdf)
-        if closed.empty:
+        # Score windows that have closed since the last batch (see the note on
+        # `fetch_undetected`): the documents read back here already carry the
+        # source-concentration fields the IP sink contributes, which the DDoS
+        # detector needs.
+        pending = self.fetch_undetected(Collections.METRICS_GLOBAL)
+        if pending.empty:
             return len(docs), 0
 
         history = self.history.refresh(self.db)
@@ -325,23 +387,15 @@ class GlobalMetricSink(BaseSink):
         model = self.model()
         anomalies: List[Dict[str, Any]] = []
 
-        for _, row in closed.iterrows():
-            key = row["window_start"]
-            if key in self._detected:
-                continue
-            # Re-read the merged document: the IP sink contributes the source
-            # concentration/entropy fields that the DDoS detector needs.
-            stored = self.db[Collections.METRICS_GLOBAL].find_one({"window_start": key.to_pydatetime()})
-            if not stored:
-                continue
-            current = pd.Series(stored)
-            past = history[history["window_start"] < pd.Timestamp(key)] if not history.empty else history
-            anomalies.extend(analyze_global(current, past, thresholds, model))
-            self._detected.add(key)
+        for _, row in pending.iterrows():
+            past = (
+                history[history["window_start"] < pd.Timestamp(row["window_start"])]
+                if not history.empty
+                else history
+            )
+            anomalies.extend(analyze_global(row, past, thresholds, model))
 
-        if len(self._detected) > 5000:
-            self._detected = set(sorted(self._detected)[-2000:])
-
+        self.mark_detected(Collections.METRICS_GLOBAL, pending, ["window_start"])
         return len(docs), self.save_anomalies(anomalies)
 
     def _write_status_docs(self, docs: List[Dict[str, Any]]) -> None:
@@ -414,12 +468,20 @@ class EndpointMetricSink(BaseSink):
             )
         bulk_upsert(Collections.METRICS_ENDPOINT, docs, ["window_start", "endpoint", "method"], db=self.db)
 
-        closed = self.closed(pd.DataFrame(docs))
-        if closed.empty:
+        pending = self.fetch_undetected(Collections.METRICS_ENDPOINT, limit=8000)
+        if pending.empty:
             return len(docs), 0
 
         history = self.history.refresh(self.db)
-        anomalies = analyze_endpoints(closed, history, self.thresholds())
+        anomalies: List[Dict[str, Any]] = []
+        # Endpoint share is measured within a window, so score a window at a time.
+        for _, group in pending.groupby("window_start", sort=True):
+            past = history[history["window_start"] < group["window_start"].iloc[0]] if not history.empty else history
+            anomalies.extend(analyze_endpoints(group, past, self.thresholds()))
+
+        self.mark_detected(
+            Collections.METRICS_ENDPOINT, pending, ["window_start", "endpoint", "method"]
+        )
         return len(docs), self.save_anomalies(anomalies)
 
 
@@ -511,12 +573,17 @@ class IpMetricSink(BaseSink):
         bulk_upsert(Collections.METRICS_IP, docs, ["window_start", "ip"], db=self.db)
         self._patch_global(window_profiles)
 
-        frame = pd.DataFrame(docs)
-        closed = self.closed(frame)
-        if closed.empty:
+        pending = self.fetch_undetected(Collections.METRICS_IP, limit=20000)
+        if pending.empty:
             return len(docs), 0
 
-        anomalies = analyze_ips(closed, pd.DataFrame(), self.thresholds(), self.model())
+        anomalies: List[Dict[str, Any]] = []
+        # The population comparison is per window: an IP is judged against the
+        # other clients active at the same moment, not against all of history.
+        for _, group in pending.groupby("window_start", sort=True):
+            anomalies.extend(analyze_ips(group, pd.DataFrame(), self.thresholds(), self.model()))
+
+        self.mark_detected(Collections.METRICS_IP, pending, ["window_start", "ip"])
         return len(docs), self.save_anomalies(anomalies)
 
     def _patch_global(self, profiles: Dict[Any, Dict[str, Any]]) -> None:
@@ -577,10 +644,17 @@ class GeoMetricSink(BaseSink):
         ]
         bulk_upsert(Collections.METRICS_GEO, docs, ["window_start", "country"], db=self.db)
 
-        closed = self.closed(pd.DataFrame(docs))
-        if closed.empty:
+        pending = self.fetch_undetected(Collections.METRICS_GEO, lookback_minutes=60, limit=4000)
+        if pending.empty:
             return len(docs), 0
-        anomalies = analyze_geo(closed, self.history.refresh(self.db), self.thresholds())
+
+        history = self.history.refresh(self.db)
+        anomalies: List[Dict[str, Any]] = []
+        for _, group in pending.groupby("window_start", sort=True):
+            past = history[history["window_start"] < group["window_start"].iloc[0]] if not history.empty else history
+            anomalies.extend(analyze_geo(group, past, self.thresholds()))
+
+        self.mark_detected(Collections.METRICS_GEO, pending, ["window_start", "country"])
         return len(docs), self.save_anomalies(anomalies)
 
 
