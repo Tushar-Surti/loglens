@@ -259,3 +259,62 @@ def test_client_errors_alone_are_not_a_service_error_spike():
     )
     result = analyze_endpoints(current, history, THRESHOLDS)
     assert AnomalyType.ERROR_SPIKE not in {a["type"] for a in result}
+
+
+# ── Geographic detection ─────────────────────────────────────────────────────
+def _geo_rows(window, shares, total=40_000):
+    """Build one window of per-country metrics from a share mapping."""
+    return [
+        {
+            "window_start": window,
+            "window_end": window + timedelta(minutes=5),
+            "country": country,
+            "country_name": country,
+            "requests": int(total * share),
+            "unique_ips": max(int(total * share / 40), 1),
+            "error_rate": 0.02,
+            "p95_response_time": 300.0,
+        }
+        for country, share in shares.items()
+    ]
+
+
+def test_established_origin_riding_the_daily_tide_is_not_flagged():
+    """When platform traffic doubles, every country doubles with it.
+
+    India, France and Australia were flagged every morning because their
+    *absolute* volume rose. Their share does not move.
+    """
+    from loglens_common.analyzers import analyze_geo
+
+    steady = {"US": 0.40, "IN": 0.12, "DE": 0.10, "GB": 0.08, "JP": 0.07, "FR": 0.07, "AU": 0.06, "BR": 0.10}
+    history = []
+    for i in range(30, 0, -1):
+        # Total volume climbs 6x across the history; every share is constant.
+        history += _geo_rows(START - timedelta(minutes=5 * i), steady, total=8_000 + 1_600 * (30 - i))
+    current = _geo_rows(START, steady, total=56_000)
+
+    found = analyze_geo(pd.DataFrame(current), pd.DataFrame(history), THRESHOLDS)
+    assert found == [], f"steady shares must not alert, got {[a['entity'] for a in found]}"
+
+
+def test_new_hostile_origin_at_a_few_percent_is_flagged():
+    """A network going from ~0% to 3% of traffic is a huge relative change.
+
+    Measured on real injected `geo_shift` scenarios, hostile origins reach only
+    1-4% of platform traffic — an absolute 5-point floor suppressed every one.
+    """
+    from loglens_common.analyzers import analyze_geo
+
+    steady = {"US": 0.43, "IN": 0.13, "DE": 0.11, "GB": 0.09, "JP": 0.08, "FR": 0.08, "AU": 0.08}
+    history = []
+    for i in range(30, 0, -1):
+        history += _geo_rows(START - timedelta(minutes=5 * i), steady, total=40_000)
+
+    shifted = dict(steady)
+    shifted = {k: v * 0.96 for k, v in shifted.items()}
+    shifted["BG"] = 0.04  # the hostile origin appears at 4%
+    current = _geo_rows(START, shifted, total=40_000)
+
+    found = analyze_geo(pd.DataFrame(current), pd.DataFrame(history), THRESHOLDS)
+    assert "BG" in {a["entity"] for a in found}, f"got {[a['entity'] for a in found]}"

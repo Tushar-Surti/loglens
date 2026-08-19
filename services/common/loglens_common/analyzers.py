@@ -812,7 +812,11 @@ def analyze_geo(
                 if total > 0:
                     share_history.append(float(past_row["requests"]) / total)
 
-        share_baseline = float(np.median(share_history)) if share_history else share
+        # No history means the origin was not previously sending traffic, so its
+        # baseline share is zero. Defaulting to the *current* share instead made
+        # every brand-new origin definitionally immaterial — the exact case this
+        # detector exists for.
+        share_baseline = float(np.median(share_history)) if share_history else 0.0
         detectors: List[DetectionResult] = [
             robust_zscore_detector(
                 share_history, share, z_threshold, 8, "up", f"share of traffic from {country}"
@@ -827,7 +831,15 @@ def analyze_geo(
                 )
             )
         # A share shift only matters if the origin is materially bigger than usual.
-        share_is_material = share >= max(share_baseline * 1.8, share_baseline + 0.05)
+        #
+        # The floor is deliberately small in absolute terms. Injected origin
+        # shifts measured on real data reach only 1-4% of platform traffic, and
+        # a hostile network going from ~0% to 3% is an enormous *relative*
+        # change even though it is a small slice. Precision here comes from the
+        # z-score on the share series — an established origin's share barely
+        # moves through the daily cycle — not from a large absolute threshold,
+        # which only suppressed every real detection.
+        share_is_material = share >= max(share_baseline * 1.5, share_baseline + 0.01)
 
         anomaly = make_anomaly(
             AnomalyType.GEO_ANOMALY,
