@@ -1,0 +1,240 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Design tokens.
+
+   Dark is the primary mode — this is a tool people keep open on a wall display
+   next to production. The light mode is a genuine second design (its own steps
+   from the same hues), not an inverted dark theme.
+
+   The categorical series colours are a validated palette: every adjacent pair
+   clears colour-vision-deficiency separation and 3:1 contrast against its own
+   surface. Series identity is never carried by colour alone — legends and
+   direct labels accompany every chart.
+   ──────────────────────────────────────────────────────────────────────────── */
+:root {
+  --canvas: 247 248 250;
+  --surface: 255 255 255;
+  --raised: 242 244 247;
+  --sunken: 249 250 251;
+  --line: 227 231 236;
+  --line-strong: 205 212 221;
+  --ink: 13 17 23;
+  --ink-2: 75 85 99;
+  --ink-3: 122 133 149;
+  --accent: 42 120 214;
+  --accent-soft: 232 240 252;
+  --grid: 236 239 243;
+
+  /* Status — fixed roles, never reused as series colours, always paired with
+     an icon or a label so meaning never rests on hue. */
+  --good: 12 163 12;
+  --warn: 250 178 25;
+  --serious: 236 131 90;
+  --critical: 208 59 59;
+
+  --series-1: 42 120 214;
+  --series-2: 235 104 52;
+  --series-3: 27 175 122;
+  --series-4: 237 161 0;
+  --series-5: 232 123 164;
+  --series-6: 0 131 0;
+  --series-7: 74 58 167;
+  --series-8: 227 73 72;
+
+  color-scheme: light;
+}
+
+.dark {
+  --canvas: 10 12 15;
+  --surface: 16 19 24;
+  --raised: 22 26 33;
+  --sunken: 13 16 20;
+  --line: 30 36 44;
+  --line-strong: 42 50 60;
+  --ink: 233 237 243;
+  --ink-2: 152 162 176;
+  --ink-3: 106 116 130;
+  --accent: 57 135 229;
+  --accent-soft: 22 38 60;
+  --grid: 27 33 41;
+
+  --good: 12 163 12;
+  --warn: 250 178 25;
+  --serious: 236 131 90;
+  --critical: 208 59 59;
+
+  --series-1: 57 135 229;
+  --series-2: 217 89 38;
+  --series-3: 25 158 112;
+  --series-4: 201 133 0;
+  --series-5: 213 81 129;
+  --series-6: 0 131 0;
+  --series-7: 144 133 233;
+  --series-8: 230 103 103;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--line));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
+    overscroll-behavior-y: none;
+  }
+
+  /* Numbers in tables, axes and stat tiles must align vertically. */
+  .tnum,
+  table,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.28);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--line-strong));
+    border-radius: 8px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--ink-3));
+    background-clip: content-box;
+    border: 3px solid transparent;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-surface border border-line rounded-md;
+  }
+
+  .panel-header {
+    @apply flex items-center justify-between gap-3 px-4 h-11 border-b border-line;
+  }
+
+  .label-caps {
+    @apply text-2xs font-medium uppercase tracking-[0.09em] text-ink-3;
+  }
+
+  .hairline {
+    @apply border-t border-line;
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-1.5 h-8 px-3 rounded text-sm font-medium
+           border border-line bg-surface text-ink-2
+           transition-colors duration-150
+           hover:text-ink hover:border-line-strong
+           disabled:opacity-45 disabled:pointer-events-none;
+  }
+
+  .btn-accent {
+    @apply bg-accent text-white border-accent hover:bg-accent/90 hover:text-white;
+  }
+
+  .btn-ghost {
+    @apply border-transparent bg-transparent hover:bg-raised;
+  }
+
+  .btn-sm {
+    @apply h-7 px-2 text-xs;
+  }
+
+  .input {
+    @apply h-8 px-2.5 rounded bg-surface border border-line text-sm text-ink
+           placeholder:text-ink-3 transition-colors
+           focus:border-accent focus:outline-none;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 h-6 px-2 rounded-sm border border-line
+           bg-raised text-2xs font-medium text-ink-2;
+  }
+
+  .cell {
+    @apply px-3 py-2 text-sm text-ink-2 align-middle;
+  }
+
+  .th {
+    @apply px-3 py-2 text-2xs font-medium uppercase tracking-[0.07em] text-ink-3
+           text-left whitespace-nowrap select-none;
+  }
+
+  .row-hover {
+    @apply transition-colors duration-100 hover:bg-raised/70;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden bg-raised rounded-sm;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background: linear-gradient(90deg, transparent, rgb(var(--line-strong) / 0.55), transparent);
+  }
+}
+
+/* Recharts chrome — styled once here rather than per chart. */
+.recharts-cartesian-axis-tick text {
+  fill: rgb(var(--ink-3));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.recharts-cartesian-grid line {
+  stroke: rgb(var(--grid));
+}
+
+.recharts-curve.recharts-tooltip-cursor,
+.recharts-rectangle.recharts-tooltip-cursor {
+  stroke: rgb(var(--line-strong));
+  fill: rgb(var(--ink) / 0.04);
+}
+
+.recharts-surface {
+  overflow: visible;
+}
+
+.recharts-legend-item-text {
+  color: rgb(var(--ink-2)) !important;
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,335 @@
+{
+  "uid": "loglens-overview",
+  "title": "LogLens — Traffic & Detection",
+  "tags": ["loglens", "observability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": true,
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "range",
+        "label": "Range",
+        "type": "custom",
+        "query": "15m,1h,6h,24h,7d",
+        "current": { "text": "6h", "value": "6h" },
+        "options": [
+          { "text": "15m", "value": "15m", "selected": false },
+          { "text": "1h", "value": "1h", "selected": false },
+          { "text": "6h", "value": "6h", "selected": true },
+          { "text": "24h", "value": "24h", "selected": false },
+          { "text": "7d", "value": "7d", "selected": false }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request rate",
+      "description": "Requests per second, aggregated by the LogLens API from Spark's 1-minute windows.",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 2, "fillOpacity": 12, "showPoints": "never", "spanNulls": true },
+          "color": { "mode": "fixed", "fixedColor": "#3987e5" }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/metrics/timeseries?range=$range&metrics=rps",
+          "url_options": { "method": "GET" },
+          "root_selector": "metrics.rps.points",
+          "columns": [
+            { "selector": "t", "text": "time", "type": "timestamp" },
+            { "selector": "v", "text": "rps", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Availability (non-5xx)",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#d03b3b", "value": null },
+              { "color": "#fab219", "value": 0.99 },
+              { "color": "#0ca30c", "value": 0.999 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/overview?range=$range",
+          "root_selector": "totals",
+          "columns": [{ "selector": "availability", "text": "availability", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "p95 latency",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "#0ca30c", "value": null },
+              { "color": "#fab219", "value": 500 },
+              { "color": "#d03b3b", "value": 1500 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/overview?range=$range",
+          "root_selector": "totals",
+          "columns": [{ "selector": "p95_response_time", "text": "p95", "type": "number" }]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Error rate",
+      "description": "4xx + 5xx as a share of all requests, re-derived from numerator and denominator rather than averaged across windows.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" },
+          "color": { "mode": "fixed", "fixedColor": "#d03b3b" }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/metrics/timeseries?range=$range&metrics=error_rate",
+          "root_selector": "metrics.error_rate.points",
+          "columns": [
+            { "selector": "t", "text": "time", "type": "timestamp" },
+            { "selector": "v", "text": "error_rate", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Latency percentiles",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p50" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#199e70" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p95" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#c98500" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p99" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#d95926" } }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/metrics/timeseries?range=$range&metrics=p50_response_time",
+          "root_selector": "metrics.p50_response_time.points",
+          "columns": [
+            { "selector": "t", "text": "time", "type": "timestamp" },
+            { "selector": "v", "text": "p50", "type": "number" }
+          ]
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/metrics/timeseries?range=$range&metrics=p95_response_time",
+          "root_selector": "metrics.p95_response_time.points",
+          "columns": [
+            { "selector": "t", "text": "time", "type": "timestamp" },
+            { "selector": "v", "text": "p95", "type": "number" }
+          ]
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/metrics/timeseries?range=$range&metrics=p99_response_time",
+          "root_selector": "metrics.p99_response_time.points",
+          "columns": [
+            { "selector": "t", "text": "time", "type": "timestamp" },
+            { "selector": "v", "text": "p99", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Recent anomalies",
+      "description": "Scores are the fused output of the detector ensemble, 0-100.",
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 17 },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "score" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "#199e70", "value": null },
+                    { "color": "#fab219", "value": 50 },
+                    { "color": "#ec835a", "value": 70 },
+                    { "color": "#d03b3b", "value": 85 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/anomalies?range=$range&severity=medium&limit=50",
+          "root_selector": "items",
+          "columns": [
+            { "selector": "window_start", "text": "time", "type": "timestamp" },
+            { "selector": "type_label", "text": "type", "type": "string" },
+            { "selector": "entity", "text": "entity", "type": "string" },
+            { "selector": "severity", "text": "severity", "type": "string" },
+            { "selector": "score", "text": "score", "type": "number" },
+            { "selector": "headline", "text": "detail", "type": "string" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Slowest endpoints",
+      "gridPos": { "h": 10, "w": 10, "x": 14, "y": 17 },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "p95" }, "properties": [{ "id": "unit", "value": "ms" }] },
+          {
+            "matcher": { "id": "byName", "options": "error_rate" },
+            "properties": [{ "id": "unit", "value": "percentunit" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/endpoints?range=$range&sort=p95&limit=15&with_sparklines=false",
+          "root_selector": "items",
+          "columns": [
+            { "selector": "endpoint", "text": "endpoint", "type": "string" },
+            { "selector": "method", "text": "method", "type": "string" },
+            { "selector": "requests", "text": "requests", "type": "number" },
+            { "selector": "p95_response_time", "text": "p95", "type": "number" },
+            { "selector": "error_rate", "text": "error_rate", "type": "number" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Top source IPs by threat score",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 27 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "loglens-infinity" },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/ips?range=$range&sort=threat_score&limit=20",
+          "root_selector": "items",
+          "columns": [
+            { "selector": "ip", "text": "ip", "type": "string" },
+            { "selector": "country", "text": "country", "type": "string" },
+            { "selector": "org", "text": "network", "type": "string" },
+            { "selector": "requests", "text": "requests", "type": "number" },
+            { "selector": "peak_rps", "text": "peak rps", "type": "number" },
+            { "selector": "unique_paths", "text": "paths", "type": "number" },
+            { "selector": "auth_fail_count", "text": "auth fails", "type": "number" },
+            { "selector": "threat_score", "text": "threat", "type": "number" }
+          ]
+        }
+      ]
+    }
+  ]
+}

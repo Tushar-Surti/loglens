@@ -1,0 +1,306 @@
+# LogLens — full local platform.
+#
+#   docker compose up -d --build          bring everything up
+#   docker compose --profile seed run --rm backfill    generate history + train
+#   docker compose logs -f streaming      watch Spark
+#
+# Ports: 3000 dashboard · 8000 API · 3001 Grafana · 9090 Spark UI ·
+#        29092 Kafka (host) · 27017 MongoDB
+
+name: loglens
+
+x-python-image: &python-image
+  build:
+    context: .
+    dockerfile: docker/python.Dockerfile
+  image: loglens/python:1.0.0
+
+x-spark-image: &spark-image
+  build:
+    context: .
+    dockerfile: docker/spark.Dockerfile
+  image: loglens/spark:1.0.0
+
+x-python-env: &python-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0&directConnection=true
+  MONGO_DB: ${MONGO_DB:-loglens}
+  MODEL_DIR: /opt/loglens/models
+  LOG_FORMAT: ${LOG_FORMAT:-console}
+  LOGLENS_ENV: docker
+
+services:
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.7.1
+    container_name: loglens-kafka
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      CLUSTER_ID: LogLensKRaftCluster01
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: ${KAFKA_PARTITIONS:-6}
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 6
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_HEAP_OPTS: "-Xmx1G -Xms512M"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 25s
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7.0
+    container_name: loglens-mongo
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "1"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+    restart: unless-stopped
+
+  mongo-init:
+    image: mongo:7.0
+    container_name: loglens-mongo-init
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./docker/mongo-init.js:/scripts/mongo-init.js:ro
+    entrypoint: ["mongosh", "--host", "mongo:27017", "--quiet", "/scripts/mongo-init.js"]
+    restart: "no"
+
+  # ── Stream processing ──────────────────────────────────────────────────────
+  spark-master:
+    <<: *spark-image
+    container_name: loglens-spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    restart: unless-stopped
+
+  spark-worker:
+    <<: *spark-image
+    container_name: loglens-spark-worker
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark-master:7077
+      - --cores
+      - "${SPARK_WORKER_CORES:-4}"
+      - --memory
+      - "${SPARK_WORKER_MEMORY:-3G}"
+    environment:
+      # Executors are launched by this worker and inherit *its* environment,
+      # not the driver's. Task closures carry their own configuration, but
+      # keeping these in sync removes a whole class of surprise.
+      <<: *python-env
+      SPARK_NO_DAEMONIZE: "true"
+    volumes:
+      - spark-checkpoints:/opt/loglens/checkpoints
+      - models:/opt/loglens/models
+    restart: unless-stopped
+
+  streaming:
+    <<: *spark-image
+    container_name: loglens-streaming
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      spark-worker:
+        condition: service_started
+      mongo-init:
+        condition: service_completed_successfully
+    command: ["python", "-m", "streaming.main"]
+    environment:
+      <<: *python-env
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_CHECKPOINT_DIR: /opt/loglens/checkpoints
+      SPARK_SHUFFLE_PARTITIONS: ${SPARK_SHUFFLE_PARTITIONS:-6}
+      SPARK_TRIGGER_INTERVAL: ${SPARK_TRIGGER_INTERVAL:-10 seconds}
+      SPARK_WATERMARK_DELAY: ${SPARK_WATERMARK_DELAY:-2 minutes}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-1500m}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-1g}
+      SPARK_EXECUTOR_CORES: ${SPARK_EXECUTOR_CORES:-2}
+      SPARK_STARTING_OFFSETS: ${SPARK_STARTING_OFFSETS:-latest}
+      # Executors dial the driver back by hostname; without this Spark advertises
+      # the container's random IP and reconnects break on restart.
+      SPARK_DRIVER_HOST: streaming
+      SPARK_LOG_LEVEL: WARN
+      PYSPARK_PYTHON: python3
+    ports:
+      - "9090:4040"   # Spark application UI
+    volumes:
+      - spark-checkpoints:/opt/loglens/checkpoints
+      - models:/opt/loglens/models
+    restart: unless-stopped
+
+  # ── Application services ───────────────────────────────────────────────────
+  generator:
+    <<: *python-image
+    container_name: loglens-generator
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    command: ["python", "-m", "generator.main"]
+    environment:
+      <<: *python-env
+      GEN_BASE_RPS: ${GEN_BASE_RPS:-180}
+      GEN_SEED: ${GEN_SEED:-1337}
+      GEN_SCENARIOS: ${GEN_SCENARIOS:-true}
+    restart: unless-stopped
+
+  api:
+    <<: *python-image
+    container_name: loglens-api
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    working_dir: /opt/loglens/api
+    environment:
+      <<: *python-env
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3000,http://localhost:5173,http://localhost:4173}
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    <<: *python-image
+    container_name: loglens-worker
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    command: ["python", "-m", "worker.main"]
+    environment:
+      <<: *python-env
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    volumes:
+      - models:/opt/loglens/models
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    image: loglens/frontend:1.0.0
+    container_name: loglens-frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: loglens-grafana
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-loglens}
+      GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource
+      GF_USERS_DEFAULT_THEME: dark
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 5s
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+  # ── One-shot jobs (profiles keep them out of `up`) ─────────────────────────
+  backfill:
+    <<: *python-image
+    profiles: ["seed"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: ["python", "-m", "generator.backfill", "--hours", "${BACKFILL_HOURS:-6}"]
+    environment:
+      <<: *python-env
+    volumes:
+      - models:/opt/loglens/models
+
+  train:
+    <<: *python-image
+    profiles: ["seed", "ml"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: ["python", "-m", "mlpipeline.train"]
+    environment:
+      <<: *python-env
+    volumes:
+      - models:/opt/loglens/models
+
+  evaluate:
+    <<: *python-image
+    profiles: ["ml"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: ["python", "-m", "mlpipeline.evaluate", "--hours", "12"]
+    environment:
+      <<: *python-env
+
+volumes:
+  kafka-data:
+  mongo-data:
+  spark-checkpoints:
+  models:
+  grafana-data:

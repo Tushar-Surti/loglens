@@ -1,0 +1,19 @@
+# The LogLens API is the datasource: Grafana reads the same JSON endpoints the
+# dashboard uses, via the Infinity plugin. That keeps one query layer (and one
+# set of aggregation semantics) instead of a second, divergent path into MongoDB.
+apiVersion: 1
+
+datasources:
+  - name: LogLens API
+    uid: loglens-infinity
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    isDefault: true
+    editable: true
+    jsonData:
+      global_queries: []
+      auth_method: none
+      allowedHosts:
+        - http://api:8000
+      timeoutInSeconds: 30
+    url: http://api:8000
