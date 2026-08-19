@@ -1,0 +1,21 @@
+# Normalise line endings so the repo is identical on Windows, macOS and Linux.
+* text=auto eol=lf
+
+# Shell scripts and anything copied into a Linux container must keep LF, or the
+# shebang line carries a \r and the container fails with "no such file".
+*.sh            text eol=lf
+*.Dockerfile    text eol=lf
+Dockerfile      text eol=lf
+Makefile        text eol=lf
+*.conf          text eol=lf
+
+# PowerShell is the one place CRLF is correct.
+*.ps1           text eol=crlf
+
+# Binary assets git should never try to diff or convert.
+*.png           binary
+*.jpg           binary
+*.ico           binary
+*.woff          binary
+*.woff2         binary
+*.joblib        binary
