@@ -23,6 +23,7 @@ without replaying the others.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import time
@@ -170,6 +171,34 @@ def start_queries(spark, args) -> List:
     return queries
 
 
+def source_lag(progress: Dict[str, Any]) -> Dict[str, Any]:
+    """Real Kafka lag, taken from Spark's own view of the source.
+
+    Structured Streaming tracks offsets in its checkpoint and never commits to a
+    consumer group, so asking the broker for "consumer group lag" returns the
+    whole retained log and grows forever. The authoritative numbers are in the
+    progress report: ``endOffset`` is what this query has processed and
+    ``latestOffset`` is what the topic holds.
+    """
+    total_lag = 0
+    per_topic: Dict[str, int] = {}
+
+    for source in progress.get("sources") or []:
+        try:
+            processed = json.loads(source.get("endOffset") or "{}")
+            available = json.loads(source.get("latestOffset") or "{}")
+        except (TypeError, ValueError):
+            continue
+        for topic, partitions in (available or {}).items():
+            done = (processed or {}).get(topic, {})
+            for partition, latest in (partitions or {}).items():
+                behind = max(int(latest) - int(done.get(partition, 0) or 0), 0)
+                per_topic[topic] = per_topic.get(topic, 0) + behind
+                total_lag += behind
+
+    return {"total": total_lag, "topics": per_topic}
+
+
 def monitor(queries: List, interval: float = 15.0) -> None:
     db = get_db()
     while _running:
@@ -194,12 +223,16 @@ def monitor(queries: List, interval: float = 15.0) -> None:
                 "batch_duration_ms": (progress.get("durationMs") or {}).get("triggerExecution", 0),
                 "duration_breakdown": progress.get("durationMs") or {},
                 "state_rows": sum(op.get("numRowsTotal", 0) for op in progress.get("stateOperators", [])),
+                "source_lag": source_lag(progress),
                 "timestamp": progress.get("timestamp"),
             }
             if not query.isActive:
                 unhealthy.append(query.name)
 
         total_in = sum(v.get("input_rows_per_second", 0) or 0 for v in snapshot.values())
+        worst_lag = max(
+            ((v.get("source_lag") or {}).get("total", 0) for v in snapshot.values()), default=0
+        )
         log.info(
             "pipeline ingest %.0f rows/s | %s",
             total_in,
@@ -211,13 +244,24 @@ def monitor(queries: List, interval: float = 15.0) -> None:
         try:
             db[Collections.CONFIG].update_one(
                 {"key": "spark_queries"},
-                {"$set": {"value": snapshot, "updated_at": datetime.now(timezone.utc)}},
+                {
+                    "$set": {
+                        "value": snapshot,
+                        "kafka_lag": worst_lag,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
                 upsert=True,
             )
             heartbeat(
                 "spark",
                 "degraded" if unhealthy else "healthy",
-                {"queries": len(queries), "inactive": unhealthy, "input_rows_per_second": round(total_in, 2)},
+                {
+                    "queries": len(queries),
+                    "inactive": unhealthy,
+                    "input_rows_per_second": round(total_in, 2),
+                    "kafka_lag": worst_lag,
+                },
                 db=db,
             )
         except Exception as exc:  # pragma: no cover

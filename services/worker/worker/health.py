@@ -40,20 +40,34 @@ def _component_status(db, component: str) -> Dict[str, Any]:
     }
 
 
-def kafka_health() -> Dict[str, Any]:
+def kafka_health(db=None) -> Dict[str, Any]:
+    """Topic sizes from the broker, consumer lag from Spark itself.
+
+    Structured Streaming keeps offsets in its checkpoint and never commits to a
+    consumer group, so the broker has no idea how far along it is: asking for
+    "group lag" returns the entire retained log and climbs forever, which pinned
+    the whole platform at "degraded". Spark publishes its true position with
+    every progress report, so that is what the lag figure uses.
+    """
+    db = get_db() if db is None else db
+
+    report: Dict[str, Any] = {"bootstrap": settings.kafka.bootstrap_servers}
     try:
         from loglens_common.kafka_io import topic_lag
 
-        lag = topic_lag("loglens-spark")
-        total = sum(entry["lag"] for entry in lag.values())
-        return {
-            "status": "healthy" if total < 50_000 else "degraded",
-            "bootstrap": settings.kafka.bootstrap_servers,
-            "topics": lag,
-            "total_lag": total,
-        }
+        report["topics"] = topic_lag("loglens-spark")
     except Exception as exc:  # pragma: no cover - broker may be down
-        return {"status": "unavailable", "error": str(exc), "bootstrap": settings.kafka.bootstrap_servers}
+        return {**report, "status": "unavailable", "error": str(exc)}
+
+    spark = db[Collections.CONFIG].find_one({"key": "spark_queries"}) or {}
+    lag = spark.get("kafka_lag")
+    if lag is None:
+        # No Spark telemetry yet: report the topics but make no lag claim.
+        return {**report, "status": "unknown", "total_lag": None}
+
+    report["total_lag"] = int(lag)
+    report["status"] = "healthy" if lag < 200_000 else "degraded"
+    return report
 
 
 def mongo_health(db) -> Dict[str, Any]:
@@ -131,16 +145,16 @@ def throughput(db, minutes: int = 5) -> Dict[str, Any]:
 def collect(db=None) -> Dict[str, Any]:
     db = get_db() if db is None else db
     components = [_component_status(db, component) for component in COMPONENTS]
-    kafka = kafka_health()
+    kafka = kafka_health(db)
     mongo = mongo_health(db)
     freshness = pipeline_freshness(db)
     rates = throughput(db)
 
     degraded = [c["component"] for c in components if c["status"] in ("degraded", "stale", "unknown")]
     overall = "healthy"
-    if freshness["status"] in ("stalled", "no_data") or kafka["status"] == "unavailable":
+    if freshness["status"] in ("stalled", "no_data") or kafka.get("status") == "unavailable":
         overall = "critical"
-    elif degraded or freshness["status"] == "degraded" or kafka["status"] == "degraded":
+    elif degraded or freshness["status"] == "degraded" or kafka.get("status") == "degraded":
         overall = "degraded"
 
     snapshot = {
