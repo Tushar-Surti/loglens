@@ -223,40 +223,36 @@ The generator stamps every injected incident with an `attack_label` the detector
 make evaluate
 ```
 
-Measured on this machine over a 7-hour replay (454 one-minute windows, 194 of them containing an
+Measured on this machine over a 24-hour replay (584 one-minute windows, 296 of them containing an
 injected incident, severity ≥ medium):
 
 ```
-confusion         : TP=159  FP=48  FN=27  TN=217
-precision         : 0.768
-recall            : 0.855
-F1                : 0.809
-false-positive rt : 0.181
-incident recall   : 0.833   (35 of 42 incidents caught)
+confusion         : TP=267  FP=34  FN=29  TN=246
+precision         : 0.887
+recall            : 0.902
+F1                : 0.894
+false-positive rt : 0.121
+incident recall   : 0.908   (59 of 65 incidents caught)
 detection latency : 0.3 min
 
 scenario               per-minute     per-incident
-ddos_burst             1.00 (12/12)   1.00 (3/3)
-service_outage         1.00 (17/17)   1.00 (4/4)
 data_scraping          1.00 (41/41)   1.00 (7/7)
-endpoint_scan          0.96 (24/25)   0.86 (6/7)
-bot_surge              0.94 (15/16)   0.83 (5/6)
-credential_stuffing    0.94 (16/17)   0.80 (4/5)
-error_spike            0.92 (12/13)   0.67 (2/3)
-latency_degradation    0.49 (22/45)   0.57 (4/7)
+ddos_burst             1.00 (19/19)   1.00 (5/5)
+geo_shift              1.00 (11/11)   1.00 (2/2)
+service_outage         1.00 (22/22)   1.00 (5/5)
+error_spike            0.96 (23/24)   0.86 (6/7)
+bot_surge              0.95 (20/21)   0.89 (8/9)
+endpoint_scan          0.89 (39/44)   0.90 (9/10)
+credential_stuffing    0.86 (19/22)   0.71 (5/7)
+latency_degradation    0.79 (73/92)   0.92 (12/13)
 ```
-
-Two things worth reading carefully:
 
 **Both recall figures are reported, because minute-level recall is misleading on its own.** A latency
 degradation that ramps over 25% of its duration has minutes at each end that are *labelled* as
 incident but where the metric is still at baseline — there is genuinely nothing to detect. Per-minute
 recall punishes those; per-incident recall answers the question an operator actually asks: *was it
-caught, and how fast?*
-
-**`latency_degradation` is the weakest detector at 0.57**, and the reason is visible in the data: it
-fires on endpoints that are already slow. `/api/v1/payments` has a 1,030 ms baseline, so a 4× injection
-has to clear a high bar before it looks unusual. That is a real limitation, stated rather than hidden.
+caught, and how fast?* `latency_degradation` shows the gap clearly: 0.79 per minute, 0.92 per
+incident.
 
 The report is written to MongoDB and rendered on the Anomalies page, so the dashboard is honest about
 how good its own detection is.
@@ -264,16 +260,21 @@ how good its own detection is.
 ### How it got there
 
 The first run of this evaluation scored **precision 0.605, F1 0.700**, with 7,988 detections over the
-same period. Four rounds of measured tuning — each one driven by inspecting what the false positives
-actually were — brought it to 1,632 detections at F1 0.809:
+same period. Six rounds of measured tuning — each driven by inspecting what the false positives
+actually were — brought it to F1 0.894:
 
 | Fix | Why it was wrong | Effect |
 |---|---|---|
 | Volume floor on the model-only IP catch-all | In a heavy-tailed population *being in the tail is normal*; 5-request clients with a 100% error ratio were scored critical | `suspicious_ip` precision 50% → 99% |
 | Mahalanobis given its own detector identity | It reported itself as `isolation_forest`, so fusion counted two correlated views of the same statistic as independent agreement and inflated borderline scores | removed a systematic score inflation |
 | Materiality gates (sample size + effect size) | A p95 moving 60 ms → 195 ms is a 12σ event and irrelevant; an error rate over 22 requests supports no claim at all | `slow_endpoint` 1,635 → 43 detections, precision 10% → 98% |
-| Trend-residual detector, and share-based endpoint/geo signals | A rolling median lags a rising series, so the whole morning ramp reads as a continuous spike; and when total traffic doubles, every endpoint and country doubles with it | `traffic_spike` precision 12% → 81%; `geo_anomaly` false positives eliminated |
+| Trend-residual detector, and share-based endpoint/geo signals | A rolling median lags a rising series, so the whole morning ramp reads as a continuous spike; and when total traffic doubles, every endpoint and country doubles with it | `traffic_spike` precision 12% → 81% |
 | Error detection keyed on 5xx, not total errors | 401s from auth-protected routes are the service working correctly — anonymous clients give `/api/v1/cart` a permanent double-digit 4xx rate | removed 140 false positives in one change |
+| Share materiality re-calibrated against real data | The first cut demanded a 5-point share gain and treated a *new* origin's baseline as its current share — together those suppressed every injected `geo_shift`, which measure only 1-4% of traffic | `geo_shift` recall 0.00 → 1.00 |
+
+The last row is the one worth dwelling on: the fix for a false-positive problem quietly created a
+false-*negative* problem, and only re-measuring caught it. Tuning a detector without re-running the
+evaluation is guessing.
 
 Every one of those is pinned by a regression test in `tests/test_regressions.py`, including the
 negative cases (the volume floor must not suppress a real attacker; the 5xx rule must still catch a
