@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from loglens_common.schemas import AnomalyType, Collections, Severity
 
-from ..deps import Pagination, TimeRange, db, pagination, time_range
+from ..deps import Pagination, TimeRange, db, drop_open_bucket, pagination, time_range
 from ..serialization import doc, docs, jsonable
 
 router = APIRouter(tags=["security"])
@@ -147,7 +147,9 @@ async def anomalies_summary(window: TimeRange = Depends(time_range)):
         "range": window.as_dict(),
         "by_type": by_type,
         "by_severity": by_severity,
-        "timeline": [timeline[key] for key in sorted(timeline)],
+        "timeline": drop_open_bucket(
+            [timeline[key] for key in sorted(timeline)], window.bucket_seconds
+        ),
         "top_entities": top_entities,
         "detection_quality": jsonable(quality.get("value")) if quality else None,
     }

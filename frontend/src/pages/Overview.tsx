@@ -67,11 +67,12 @@ export function Overview() {
   // detections become a handful of readable regions rather than 170 stacked
   // translucent rectangles.
   const bands = useMemo<AnomalyBand[]>(() => {
-    const worst = new Map<string, AnomalyBand>()
+    const worst = new Map<number, AnomalyBand>()
     for (const item of anomalies.data?.items ?? []) {
-      const existing = worst.get(item.window_start)
+      const at = new Date(item.window_start).getTime()
+      const existing = worst.get(at)
       if (!existing || SEVERITY_RANK[item.severity] > SEVERITY_RANK[existing.severity]) {
-        worst.set(item.window_start, {
+        worst.set(at, {
           start: item.window_start,
           end: item.window_end,
           severity: item.severity,
@@ -79,7 +80,27 @@ export function Overview() {
         })
       }
     }
-    return [...worst.values()].slice(0, 120)
+
+    // Merge windows that touch into one region. Drawing a translucent rectangle
+    // per minute stacks the alpha where they overlap, turning a five-minute
+    // incident into an opaque block with darker seams. One band per contiguous
+    // run reads as the period it actually was.
+    const ordered = [...worst.entries()].sort((a, b) => a[0] - b[0]).map(([, band]) => band)
+    const merged: AnomalyBand[] = []
+    for (const band of ordered) {
+      const previous = merged[merged.length - 1]
+      const touches = previous && new Date(band.start).getTime() <= new Date(previous.end).getTime()
+      if (touches) {
+        previous.end = band.end
+        if (SEVERITY_RANK[band.severity] > SEVERITY_RANK[previous.severity]) {
+          previous.severity = band.severity
+          previous.label = band.label
+        }
+      } else {
+        merged.push({ ...band })
+      }
+    }
+    return merged
   }, [anomalies.data])
 
   const chartData = useMemo(() => {
@@ -183,7 +204,7 @@ export function Overview() {
           title={metricMeta.label}
           subtitle={
             bands.length
-              ? `${bands.length} window${bands.length === 1 ? '' : 's'} with detections shaded`
+              ? `${bands.length} detection period${bands.length === 1 ? '' : 's'} shaded`
               : 'no detections in range'
           }
           actions={

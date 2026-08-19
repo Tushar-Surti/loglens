@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loglens_common.schemas import Collections
 
 from .. import query as query_language
-from ..deps import Pagination, TimeRange, db, pagination, time_range
+from ..deps import Pagination, TimeRange, db, drop_open_bucket, pagination, time_range
 from ..serialization import doc, docs, jsonable
 
 router = APIRouter(tags=["logs"])
@@ -167,7 +167,11 @@ async def logs_histogram(
         for status_class in classes:
             entry.setdefault(status_class, 0)
         points.append(entry)
-    return {"range": window.as_dict(), "classes": sorted(classes), "points": points}
+    return {
+        "range": window.as_dict(),
+        "classes": sorted(classes),
+        "points": drop_open_bucket(points, window.bucket_seconds),
+    }
 
 
 @router.get("/logs/facets", summary="Top values per dimension for the current search")

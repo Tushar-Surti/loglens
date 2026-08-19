@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 
 from loglens_common.schemas import Collections
 
-from ..deps import TimeRange, db, time_range
+from ..deps import TimeRange, db, drop_open_bucket, time_range
 from ..serialization import docs, jsonable
 
 router = APIRouter(tags=["overview"])
@@ -87,7 +87,11 @@ async def _series(database, window: TimeRange, metrics: List[str]) -> Dict[str, 
                 denominator = row.get(f"d_{spec['denominator']}", 0) or 0
                 value = numerator / denominator if denominator else 0.0
             output[metric].append({"t": stamp, "v": round(float(value), 4)})
-    return output
+
+    # The newest bucket is still filling; plotting it dips every chart.
+    return {
+        metric: drop_open_bucket(points, window.bucket_seconds) for metric, points in output.items()
+    }
 
 
 async def _totals(database, start: datetime, end: datetime) -> Dict[str, Any]:
@@ -263,7 +267,11 @@ async def status_breakdown(window: TimeRange = Depends(time_range)):
         for status_class in ordered:
             entry.setdefault(status_class, 0)
         points.append(entry)
-    return {"range": window.as_dict(), "classes": ordered, "points": points}
+    return {
+        "range": window.as_dict(),
+        "classes": ordered,
+        "points": drop_open_bucket(points, window.bucket_seconds),
+    }
 
 
 @router.get("/metrics/baseline", summary="Seasonal baseline band for a metric")

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from loglens_common.schemas import Collections
 
-from ..deps import TimeRange, db, time_range
+from ..deps import TimeRange, db, drop_open_bucket, time_range
 from ..serialization import jsonable
 
 router = APIRouter(tags=["geo"])
@@ -132,7 +132,12 @@ async def geo_timeseries(
         for code in selected:
             entry.setdefault(code, 0)
         points.append(entry)
-    return {"range": window.as_dict(), "countries": selected, "points": points}
+    bucket = max(window.bucket_seconds, 300)
+    return {
+        "range": window.as_dict(),
+        "countries": selected,
+        "points": drop_open_bucket(points, bucket),
+    }
 
 
 @router.get("/geo/points", summary="Point cloud for the globe view")

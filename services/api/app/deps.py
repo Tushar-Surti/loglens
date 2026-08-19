@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Dict, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Query
 
@@ -59,6 +59,32 @@ def time_range(
     if (resolved_end - resolved_start).days > 92:
         raise HTTPException(status_code=400, detail="range must not exceed 92 days")
     return TimeRange(resolved_start, resolved_end, range if not (start and end) else "custom")
+
+
+def drop_open_bucket(
+    points: List[Dict[str, Any]],
+    bucket_seconds: int,
+    key: str = "t",
+) -> List[Dict[str, Any]]:
+    """Remove the trailing bucket if it is still being filled.
+
+    The final bucket of a live range covers the current minute, which may be
+    only a few seconds old. Plotting it makes every chart dip at the right edge
+    and makes the newest value look like a collapse — the single most common
+    way a dashboard lies to the person reading it.
+
+    Only the last point is considered: earlier gaps are genuine.
+    """
+    if not points:
+        return points
+    try:
+        last = datetime.fromisoformat(str(points[-1][key]).replace("Z", "+00:00"))
+    except (KeyError, ValueError, TypeError):
+        return points
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    closes_at = last + timedelta(seconds=bucket_seconds)
+    return points[:-1] if closes_at > datetime.now(timezone.utc) else points
 
 
 class Pagination:
