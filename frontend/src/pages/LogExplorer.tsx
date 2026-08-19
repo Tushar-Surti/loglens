@@ -146,6 +146,7 @@ export function LogExplorer() {
               classes={histogram.data.classes}
               bucketSeconds={histogram.data.range.bucket_seconds}
               height={140}
+              variant="bars"
             />
           )}
         </Panel>

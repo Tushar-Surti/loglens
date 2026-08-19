@@ -82,7 +82,22 @@ export function Overview() {
     p95_response_time: { label: 'p95 latency', format: (value: number) => ms(value), color: theme.series[3] },
   }[metric]
 
-  const feed = recentAnomalies.length ? recentAnomalies : (anomalies.data?.items ?? [])
+  // The live socket reports anomalies by *detection* time, so after a restart it
+  // replays detections for old windows. Showing those next to a KPI that counts
+  // by window time made the panel contradict the number above it. Both are
+  // filtered to the selected range; ordering stays newest-window-first.
+  const feed = useMemo(() => {
+    const from = new Date(overview.data?.range.start ?? 0).getTime()
+    const to = new Date(overview.data?.range.end ?? Date.now()).getTime()
+    const merged = new Map<string, (typeof recentAnomalies)[number]>()
+    for (const anomaly of [...recentAnomalies, ...(anomalies.data?.items ?? [])]) {
+      const at = new Date(anomaly.window_start).getTime()
+      if (at >= from && at <= to) merged.set(anomaly.anomaly_id, anomaly)
+    }
+    return [...merged.values()].sort(
+      (a, b) => new Date(b.window_start).getTime() - new Date(a.window_start).getTime(),
+    )
+  }, [recentAnomalies, anomalies.data, overview.data])
 
   return (
     <PageTransition>

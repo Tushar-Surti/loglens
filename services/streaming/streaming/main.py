@@ -187,7 +187,12 @@ def monitor(queries: List, interval: float = 15.0) -> None:
                 "input_rows_per_second": round(progress.get("inputRowsPerSecond") or 0.0, 2),
                 "processed_rows_per_second": round(progress.get("processedRowsPerSecond") or 0.0, 2),
                 "num_input_rows": progress.get("numInputRows", 0),
-                "batch_duration_ms": progress.get("batchDuration", 0),
+                # Spark reports timings in a nested `durationMs` map; there is no
+                # top-level `batchDuration`, so reading one reported 0 ms for
+                # every query no matter how long the batch actually took.
+                # `triggerExecution` is the wall time of the whole micro-batch.
+                "batch_duration_ms": (progress.get("durationMs") or {}).get("triggerExecution", 0),
+                "duration_breakdown": progress.get("durationMs") or {},
                 "state_rows": sum(op.get("numRowsTotal", 0) for op in progress.get("stateOperators", [])),
                 "timestamp": progress.get("timestamp"),
             }

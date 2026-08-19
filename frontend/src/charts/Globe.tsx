@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 
+import { useUi } from '@/lib/store'
 import type { GeoPoint } from '@/lib/types'
 
 const RADIUS = 1
@@ -51,6 +52,7 @@ function graticule(segments = 64): THREE.BufferGeometry {
 }
 
 export function Globe({ points, height = 420 }: { points: GeoPoint[]; height?: number }) {
+  const theme = useUi((state) => state.theme)
   const containerRef = useRef<HTMLDivElement>(null)
   const pointsRef = useRef<GeoPoint[]>(points)
   const rebuildRef = useRef<((data: GeoPoint[]) => void) | null>(null)
@@ -84,17 +86,29 @@ export function Globe({ points, height = 420 }: { points: GeoPoint[]; height?: n
     root.rotation.z = (-23.4 * Math.PI) / 180 // axial tilt, purely for character
     scene.add(root)
 
+    // Design tokens are stored as space-separated channels ("10 12 15") so they
+    // can be used with Tailwind's `<alpha-value>` syntax. THREE.Color cannot
+    // parse CSS Color Level 4 `rgb(10 12 15)` — it silently falls back to white,
+    // which rendered the entire globe as a white ball. Parse the channels
+    // ourselves instead of handing three.js a string it does not understand.
     const styles = getComputedStyle(document.documentElement)
-    const read = (name: string) => `rgb(${styles.getPropertyValue(name).trim()})`
-    const accent = new THREE.Color(read('--accent'))
-    const critical = new THREE.Color(read('--critical'))
-    const warn = new THREE.Color(read('--warn'))
-    const lineColor = new THREE.Color(read('--line-strong'))
+    const read = (name: string, fallback = 0x8899aa): THREE.Color => {
+      const raw = styles.getPropertyValue(name).trim()
+      const channels = raw.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n))
+      if (channels.length < 3) return new THREE.Color(fallback)
+      return new THREE.Color(channels[0] / 255, channels[1] / 255, channels[2] / 255)
+    }
+
+    const accent = read('--accent', 0x3987e5)
+    const critical = read('--critical', 0xd03b3b)
+    const warn = read('--warn', 0xfab219)
+    const lineColor = read('--line-strong', 0x2a323c)
+    const bodyColor = read('--canvas', 0x0a0c0f)
 
     // Sphere body — nearly opaque so back-side spikes do not show through.
     const sphere = new THREE.Mesh(
       new THREE.SphereGeometry(RADIUS * 0.995, 48, 48),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(read('--canvas')), transparent: true, opacity: 0.92 }),
+      new THREE.MeshBasicMaterial({ color: bodyColor, transparent: true, opacity: 0.92 }),
     )
     root.add(sphere)
 
@@ -246,7 +260,7 @@ export function Globe({ points, height = 420 }: { points: GeoPoint[]; height?: n
       container.removeChild(renderer.domElement)
       rebuildRef.current = null
     }
-  }, [height])
+  }, [height, theme])
 
   useEffect(() => {
     rebuildRef.current?.(points)

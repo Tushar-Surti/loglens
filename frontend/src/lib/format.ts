@@ -27,12 +27,19 @@ export function percent(value: number | null | undefined, digits = 2): string {
   return `${(value * 100).toFixed(digits)}%`
 }
 
-/** Latency in ms with a unit that stays readable across four orders of magnitude. */
+/** Latency in ms with a unit that stays readable across four orders of magnitude.
+ *
+ * The unit is chosen from the *magnitude*, with the sign reapplied afterwards.
+ * Deciding on the raw value made every negative number take the microsecond
+ * branch, so an ingest latency of −145 ms rendered as "−144500µs".
+ */
 export function ms(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—'
-  if (value < 1) return `${(value * 1000).toFixed(0)}µs`
-  if (value < 1000) return `${value.toFixed(value < 10 ? 1 : 0)}ms`
-  return `${(value / 1000).toFixed(2)}s`
+  const sign = value < 0 ? '-' : ''
+  const magnitude = Math.abs(value)
+  if (magnitude < 1) return `${sign}${(magnitude * 1000).toFixed(0)}µs`
+  if (magnitude < 1000) return `${sign}${magnitude.toFixed(magnitude < 10 ? 1 : 0)}ms`
+  return `${sign}${(magnitude / 1000).toFixed(2)}s`
 }
 
 export function bytes(value: number | null | undefined): string {
