@@ -224,7 +224,8 @@ make evaluate
 ```
 
 Measured on this machine over a 24-hour replay (584 one-minute windows, 296 of them containing an
-injected incident, severity ≥ medium):
+injected incident, severity ≥ medium). The traffic is regenerated on every run, so your figures will
+differ by a few points — the numbers below are one representative run, not a fixed benchmark:
 
 ```
 confusion         : TP=267  FP=34  FN=29  TN=246
