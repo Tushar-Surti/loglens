@@ -15,13 +15,11 @@ partially-filled window would otherwise look like a traffic collapse.
 from __future__ import annotations
 
 import logging
-import math
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
-import numpy as np
 import pandas as pd
 
 from loglens_common.analyzers import (
@@ -34,7 +32,7 @@ from loglens_common.analyzers import (
 )
 from loglens_common.config import settings
 from loglens_common.detectors import ModelBundle, gini, normalized_entropy
-from loglens_common.mongo import bulk_insert, bulk_upsert, get_db, get_thresholds
+from loglens_common.mongo import bulk_upsert, get_db, get_thresholds
 from loglens_common.schemas import Collections
 
 from .history import MetricHistory

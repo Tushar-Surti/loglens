@@ -14,7 +14,7 @@ import os
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from loglens_common.mongo import get_db
 from loglens_common.schemas import Collections, DEFAULT_ALERT_RULES, Severity

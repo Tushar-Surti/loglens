@@ -34,7 +34,6 @@ from loglens_common.logging_setup import setup_logging
 from loglens_common.mongo import ensure_indexes, get_db, heartbeat
 from loglens_common.schemas import Collections
 
-from . import sinks as sink_module
 from .sinks import (
     EndpointMetricSink,
     GeoMetricSink,

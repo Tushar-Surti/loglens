@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from loglens_common.schemas import Collections
 
 from ..deps import TimeRange, db, time_range
-from ..serialization import docs, jsonable
+from ..serialization import jsonable
 
 router = APIRouter(tags=["geo"])
 

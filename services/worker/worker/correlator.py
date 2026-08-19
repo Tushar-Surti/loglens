@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from loglens_common.mongo import bulk_upsert, get_db
 from loglens_common.schemas import AnomalyType, Collections, EntityType, Severity

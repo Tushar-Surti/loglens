@@ -11,13 +11,12 @@ couple of seconds, which is what powers the "inject incident" demo button.
 from __future__ import annotations
 
 import argparse
-import json
 import random
 import signal
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loglens_common.config import settings
 from loglens_common.kafka_io import delivery_logger, ensure_topics, json_serializer, make_producer

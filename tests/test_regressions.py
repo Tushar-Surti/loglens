@@ -9,7 +9,6 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from loglens_common.analyzers import analyze_endpoints, analyze_ips
 from loglens_common.detectors import fuse, mahalanobis_detector, robust_zscore_detector

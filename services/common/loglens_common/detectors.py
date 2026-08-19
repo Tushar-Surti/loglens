@@ -31,7 +31,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from .schemas import AnomalyType, Detector, EntityType, Severity
+from .schemas import AnomalyType, Detector, Severity
 
 EPS = 1e-9
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -38,7 +38,7 @@ from .catalog import (
     Endpoint,
     GeoZone,
 )
-from .scenarios import AttackerProfile, Mutation, Scenario, ScenarioScheduler
+from .scenarios import AttackerProfile, Scenario, ScenarioScheduler
 
 SCHEMA_VERSION = 1
 

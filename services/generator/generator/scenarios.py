@@ -19,9 +19,8 @@ from __future__ import annotations
 
 import math
 import random
-import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from .catalog import ATTACK_TOOLS, HOSTILE_ZONES, SCAN_PATHS

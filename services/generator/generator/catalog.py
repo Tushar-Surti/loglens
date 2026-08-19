@@ -7,8 +7,8 @@ uniform noise — that is what makes the downstream statistics meaningful.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
 
 
 @dataclass(frozen=True)
