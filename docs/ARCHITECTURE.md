@@ -70,10 +70,10 @@ independent `StreamingQuery` with its own checkpoint directory.
 |---|---|---|---|---|
 | `raw_logs` | none | append | 5 s | MongoDB (executor-side) |
 | `enriched` | none | append | 5 s | Kafka |
-| `metrics_global` | `window(1 min)` | update | 10 s | Mongo + global detection |
-| `metrics_endpoint` | `window(1 min)`, endpoint, method, service | update | 10 s | Mongo + endpoint detection |
-| `metrics_ip` | `window(1 min)`, ip, endpoint | update | 10 s | Mongo + IP detection |
-| `metrics_geo` | `window(5 min)`, country | update | 30 s | Mongo + geo detection |
+| `metrics_global` | `window(1 min)` | update | 10 s | Mongo, then a detection sweep |
+| `metrics_endpoint` | `window(1 min)`, endpoint, method, service | update | 10 s | Mongo, then a detection sweep |
+| `metrics_ip` | `window(1 min)`, ip, endpoint | update | 10 s | Mongo, then a detection sweep |
+| `metrics_geo` | `window(5 min)`, country | update | 30 s | Mongo, then a detection sweep |
 | `metrics_service` | `window(1 min)`, service | update | 10 s | Mongo |
 | `sessions` | `session_window(15 min)`, session_id | append | 30 s | Mongo + session detection |
 
@@ -117,13 +117,36 @@ segments (`/products/48213`) almost every request would be a "unique path", whic
 cardinality and destroys the scanning signal. Scanner probes (`/.env`, `/wp-admin/`) are their own
 endpoints, so enumeration still shows up as high `unique_paths`.
 
-### Late data and window closure
+### Late data, window closure, and why detection is decoupled
 
-A 2-minute watermark accepts late events. Critically, **detection only fires once a window is
-closed** (`window_end` older than the watermark). Structured Streaming re-emits an open window on
-every trigger; scoring a partially-filled window would report a traffic collapse every ten seconds.
+A 2-minute watermark accepts late events, and **detection only scores closed windows**
+(`window_end` older than the watermark). Scoring a partially-filled window would report a traffic
+collapse every ten seconds.
 
-Because the same closed window may still be emitted more than once, anomaly IDs are content-derived:
+The subtle part is *where* that check can live. The obvious implementation — filter the batch Spark
+just handed the sink for closed windows — does not work, and fails silently:
+
+> In `update` output mode a window is emitted only while it is still **changing**. A window becomes
+> safe to score only once it has **stopped** changing. Those two conditions never overlap, so the
+> filter matches almost nothing and live detection quietly does nothing at all.
+
+It is a nasty bug because it *looks* fine: every query runs, every batch writes rows, no error is
+logged, and while the pipeline is replaying a backlog it even works — each batch then spans
+event-time far behind the wall clock, so windows arrive already closed. Detection stops the moment
+the pipeline catches up with real time, which is exactly when anyone would be watching.
+
+So the two concerns are separated:
+
+* **Metrics** are written straight from the stream in `update` mode, so the dashboard charts are
+  real-time.
+* **Detection** sweeps MongoDB each batch for windows that have closed since the last pass and are
+  not yet marked `detected`, scores them, and flags them. Metrics stay live; detection trails by the
+  watermark — which is precisely the guarantee a watermark offers.
+
+That also makes detection idempotent across restarts (the flag is persisted, not in memory) and lets
+the same code path be replayed offline by `--detect-only`.
+
+Because a closed window may still be emitted more than once, anomaly IDs are content-derived:
 
 ```python
 anomaly_id = "anm_" + sha1(f"{type}|{entity_type}|{entity}|{window_start}")[:20]
@@ -367,6 +390,10 @@ answers "would the new configuration have caught last Tuesday?".
 - **Single-node everything.** One Kafka broker, one Mongo node, one Spark worker by default. The
   topology is horizontally scalable (partitions, `--scale spark-worker=N`, replica sets) but is not
   configured for HA here.
+- **Kafka lag is read from Spark, not from the broker.** Structured Streaming keeps offsets in its
+  checkpoint and never commits to a consumer group, so a broker-side "consumer group lag" query
+  returns the entire retained log and climbs forever — which pinned the health page at *degraded*
+  permanently. The true position is in each query's progress report (`endOffset` vs `latestOffset`).
 - **Executors carry their own configuration.** Spark executors are launched by the *worker* and
   inherit its environment, not the driver's. Task closures therefore pass connection settings
   explicitly rather than reading them from the process environment — relying on environment parity
