@@ -39,6 +39,8 @@ const PRIMARY_METRICS = [
 
 type PrimaryMetric = (typeof PRIMARY_METRICS)[number]['value']
 
+const SEVERITY_RANK: Record<string, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 }
+
 export function Overview() {
   const theme = useChartTheme()
   const live = useUi((state) => state.live)
@@ -57,19 +59,28 @@ export function Overview() {
 
   // Anomaly windows drawn behind the traffic line: an incident and the metric
   // that produced it belong in the same glance.
-  const bands = useMemo<AnomalyBand[]>(
-    () =>
-      (anomalies.data?.items ?? [])
-        .filter((item) => item.entity_type === 'global')
-        .slice(0, 40)
-        .map((item) => ({
+  //
+  // Every entity type counts, not just platform-level ones. A DDoS often fires
+  // twenty per-IP detections without tripping the global volume detector, and
+  // shading only `global` left the chart looking clean during an active attack.
+  // Windows are collapsed to one band each, keeping the worst severity, so 170
+  // detections become a handful of readable regions rather than 170 stacked
+  // translucent rectangles.
+  const bands = useMemo<AnomalyBand[]>(() => {
+    const worst = new Map<string, AnomalyBand>()
+    for (const item of anomalies.data?.items ?? []) {
+      const existing = worst.get(item.window_start)
+      if (!existing || SEVERITY_RANK[item.severity] > SEVERITY_RANK[existing.severity]) {
+        worst.set(item.window_start, {
           start: item.window_start,
           end: item.window_end,
           severity: item.severity,
           label: item.type_label,
-        })),
-    [anomalies.data],
-  )
+        })
+      }
+    }
+    return [...worst.values()].slice(0, 120)
+  }, [anomalies.data])
 
   const chartData = useMemo(() => {
     const points = series?.[metric] ?? []
@@ -170,7 +181,11 @@ export function Overview() {
         <Panel
           className="xl:col-span-2"
           title={metricMeta.label}
-          subtitle={bands.length ? `${bands.length} detected windows shaded` : 'no anomalies in range'}
+          subtitle={
+            bands.length
+              ? `${bands.length} window${bands.length === 1 ? '' : 's'} with detections shaded`
+              : 'no detections in range'
+          }
           actions={
             <SegmentedControl
               options={PRIMARY_METRICS.map((item) => ({ value: item.value, label: item.label }))}
