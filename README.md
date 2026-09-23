@@ -19,6 +19,7 @@ ensemble, MongoDB for serving, and an operator dashboard built for people who st
 
 - [What it does](#what-it-does)
 - [Quick start](#quick-start)
+- [Screenshots](#screenshots)
 - [Architecture](#architecture)
 - [Anomaly detection](#anomaly-detection)
 - [The dashboard](#the-dashboard)
@@ -94,7 +95,7 @@ Then open:
 | API docs | http://localhost:8000/docs | OpenAPI, every endpoint |
 | Grafana | http://localhost:3001 | `admin` / `loglens` |
 | Spark UI | http://localhost:9090 | streaming query progress |
-| Spark master | http://localhost:8080 | cluster state |
+| Spark master | http://localhost:18080 | cluster state | 
 
 ### The 60-second demo
 
@@ -108,6 +109,49 @@ Then open:
    - **Geography** lights up the hostile origins on the globe.
 4. Nothing about that path is faked: the scenario is queued to the generator, produced to Kafka,
    aggregated by Spark, scored by the detectors and correlated by the worker.
+
+---
+
+## Screenshots
+
+Captured from a live local run — `./scripts/bootstrap.sh`, 6h of backfilled history, real traffic
+still flowing. Nothing staged, no mock data.
+
+**Overview** — platform health, live detections streaming over the WebSocket, response/latency breakdown
+![Overview](docs/screenshots/overview.png)
+
+**Traffic** — volume, composition, and the shape indicators (source concentration, path entropy, bot share) that feed DDoS/bot detection
+![Traffic](docs/screenshots/traffic.png)
+
+**Endpoints** — per-route throughput, error rate, latency and apdex, sorted and filterable
+![Endpoints](docs/screenshots/endpoints.png)
+
+**Sessions** — gap-based session windows from Spark, entry/exit points, conversion and bot share
+![Sessions](docs/screenshots/sessions.png)
+
+**Log Explorer** — query language, facets, match histogram, live Kafka tail
+![Log Explorer](docs/screenshots/log-explorer.png)
+
+**Geography** — three.js origin globe with flagged sources ranked by threat score
+![Geography](docs/screenshots/geography.png)
+
+**Anomalies** — every detection with its score, the detectors that agreed, and measured precision/recall against injected ground truth
+![Anomalies](docs/screenshots/anomalies.png)
+
+**Incidents** — correlated records, not raw detection spam (a botnet is one incident, not twenty)
+![Incidents](docs/screenshots/incidents.png)
+
+**Incident detail** — timeline, contributing detections, alerts fired, affected entities
+![Incident detail](docs/screenshots/incident-detail.png)
+
+**Alerts** — rule matches that crossed the notification threshold, with per-entity cooldowns
+![Alerts](docs/screenshots/alerts.png)
+
+**System Health** — ingest lag, Kafka consumer lag per topic, per-query Spark Structured Streaming progress
+![System Health](docs/screenshots/system-health.png)
+
+**API docs** — every endpoint, OpenAPI 3.1, generated from the FastAPI service
+![API docs](docs/screenshots/api-docs.png)
 
 ---
 
